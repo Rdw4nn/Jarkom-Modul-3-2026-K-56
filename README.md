@@ -430,7 +430,9 @@ Script ini menulis ulang konfigurasi relay yang benar dan menjalankan service.
 
 # SOAL 4 | Dua Pool DHCP pada Network 2
 
-Kelompok: K56 | Prefix IP: `192.239`
+Kelompok: K56 | Prefix IP: `192.239.x.x`
+
+> Agar tim Dev dan Support di Divisi A menerima jatah alamat yang berbeda, atur dua pool DHCP pada Network 2. Tetapkan Pool 1 ([PREFIX IP].2.10–[PREFIX IP].2.35) untuk itadori dan fushiguro, serta Pool 2 ([PREFIX IP].2.70–[PREFIX IP].2.95) untuk zenin dan okkotsu. Rentang [PREFIX IP].2.36–[PREFIX IP].2.69 tidak boleh dialokasikan. Karena seluruh client berada pada subnet yang sama, gunakan DHCP class berdasarkan MAC Address atau Client ID untuk memisahkan kedua kelompok.
 
 ## 1. Tujuan
 

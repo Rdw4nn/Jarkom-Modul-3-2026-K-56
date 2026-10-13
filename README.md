@@ -169,5 +169,5 @@ jichi berfungsi sebagai router: forwarding aktif, source NAT memberi akses inter
 Aturan iptables tidak persisten. Setelah node restart, jalankan ulang script:
 
 ```bash
-/root/setup-jichi.sh
+./setup-jichi.sh
 ```

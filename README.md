@@ -160,9 +160,9 @@ Hasil yang diharapkan: IP sesuai tabel, ping ke gateway dan ke `8.8.8.8` berhasi
 
 | Host | Screenshot |
 |---|---|
-| utahime, shoko, gojo, geto | `[02-utahime.png]` |
-| maki, panda, nanami, todo | `[06-maki.png]` |
-| kirara, inumaki, yaga, tengen | `[10-kirara.png]` |
+| utahime, shoko, gojo, geto | ![Topologi](assets/modul3_1.png) |
+| maki, panda, nanami, todo | ![Topologi](assets/modul3_1.1.png) |
+| kirara, inumaki, yaga, tengen | ![Topologi](assets/modul3_1.2.png) |
 
 ## 5. Kesimpulan
 

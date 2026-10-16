@@ -144,7 +144,8 @@ Hasil yang diharapkan:
 - Terdapat aturan `-A POSTROUTING -o eth0 -j MASQUERADE`
 - Ping ke `8.8.8.8` berhasil
 
-  Screenshot: ![Topologi](assets/modul3_1.png)
+Screenshot:
+![Topologi](assets/modul3_1.png)
 
 ### 4.2 Setiap host infrastruktur
 

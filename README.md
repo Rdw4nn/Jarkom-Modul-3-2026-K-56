@@ -9,7 +9,7 @@
 
 # SOAL 0 | TOPOLOGI
 
-
+![Topologi](assets/modul3_0.png)
 
 # SOAL 1 | Konektivitas Dasar 
 

@@ -7,7 +7,11 @@
 
 ## LAPORAN RESMI MODUL 3
 
-# SOAL 1 | Konektivitas Dasar (jichi sebagai Router)
+# SOAL 0 | TOPOLOGI
+
+
+
+# SOAL 1 | Konektivitas Dasar 
 
 Kelompok: K56 | Prefix IP: `192.239.x.x`
 

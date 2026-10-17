@@ -1077,3 +1077,162 @@ Hasil: `eth2` bernilai `192.239.2.1/24` dan `eth3` bernilai `192.239.3.1/24`, sa
 ## 7. Kesimpulan
 
 Capture pada tengen menunjukkan urutan lengkap Discover, Offer, Request, dan ACK untuk klien itadori: server `192.239.4.10` memberikan alamat `192.239.2.11` dengan lease 600 detik. Nilai giaddr `192.239.2.1` sesuai dengan IP interface `eth2` jichi yang menerima request dari Network 2, dan balasan server dikirim ke giaddr tersebut, sehingga relay bekerja sebagaimana mestinya.
+
+
+
+# Soal 9 – Simulasi Gangguan DHCP Relay
+
+Kelompok: K56 | Prefix IP: `192.239`
+
+## 1. Tujuan
+
+Sebuah gangguan memutus jalur relay sehingga permintaan alamat tidak sampai ke Data Center. Langkah yang dilakukan:
+
+1. Menghentikan service DHCP Relay pada jichi
+2. Memaksa klien Network 2 meminta lease baru dan mencatat gejalanya
+3. Memulihkan service relay dan mengulangi permintaan DHCP
+4. Membuktikan klien kembali memperoleh alamat dari pool yang benar dengan gateway semula
+
+Klien uji: **itadori** (Network 2, Pool 1 `192.239.2.10 – .35`, gateway `192.239.2.1`).
+
+## 2. Prosedur
+
+### 2.1 Kondisi normal (pembanding)
+
+Pada itadori:
+
+```bash
+ifdown eth0; ifup eth0
+ip -4 addr show eth0; ip route | grep default
+```
+
+### 2.2 Hentikan relay
+
+Pada jichi:
+
+```bash
+service isc-dhcp-relay stop
+pkill dhcrelay
+sleep 2
+ps aux | grep [d]hcrelay
+```
+
+`ps` kosong menandakan relay mati.
+![modul3](assets/modul3_9.png)
+
+### 2.3 Paksa klien meminta lease baru
+
+Pada itadori:
+
+```bash
+ifdown eth0
+ip addr flush dev eth0
+ifup eth0
+ip -4 addr show eth0; ip route
+```
+
+Bukti pendukung (opsional), dijalankan sebelum `ifup`:
+
+```bash
+# jichi
+tcpdump -ni eth2 port 67 or port 68
+# tengen
+tcpdump -ni eth0 port 67 or port 68
+```
+
+### 2.4 Pulihkan relay
+
+Pada jichi:
+
+```bash
+service isc-dhcp-relay start
+ps aux | grep [d]hcrelay
+```
+
+### 2.5 Ulangi permintaan DHCP
+
+Pada itadori:
+
+```bash
+ifdown eth0; ifup eth0
+ip -4 addr show eth0; ip route | grep default
+```
+![modul3](assets/modul3_9.2.png)
+
+## 3. Hasil
+
+### 3.1 Kondisi normal
+
+```
+udhcpc: lease of 192.239.2.11 obtained from 192.239.4.10, lease time 600
+```
+
+IP `192.239.2.11` (Pool 1) dari server `192.239.4.10`.
+
+> Screenshot: `[01-itadori-normal.png]`
+
+### 3.2 Relay dihentikan
+
+Pada jichi, setelah `service isc-dhcp-relay stop`, `ps` sempat menampilkan entri `[dhcrelay]` berstatus `Ds` dengan ukuran 0, yaitu proses defunct yang sedang keluar dan tidak lagi berfungsi. Penambahan `pkill dhcrelay` dan `sleep 2` dilakukan agar `ps` bersih.
+
+
+### 3.3 Gejala gangguan pada klien
+
+```
+udhcpc: started, v1.37.0
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc failed to get a DHCP lease
+udhcpc: no lease, forking to background
+```
+
+Gejala: discover dikirim berulang tanpa Offer, klien gagal memperoleh lease, dan `eth0` tidak memiliki alamat IPv4 maupun default route.
+
+Penjelasan: broadcast DISCOVER klien hanya terjangkau sampai jichi. Tanpa relay, tidak ada proses yang meneruskannya ke tengen di Network 4, sehingga tengen tidak pernah menerima request dan tidak ada balasan.
+
+> Screenshot: 
+![modul3](assets/modul3_9.1.png)
+
+### 3.4 Relay dipulihkan
+
+```
+Requesting: eth2 as upstream: N downstream: Y
+Requesting: eth3 as upstream: N downstream: Y
+Requesting: eth4 as upstream: Y downstream: N
+root  508  ...  /usr/sbin/dhcrelay -q -id eth2 -id eth3 -iu eth4 192.239.4.10
+```
+
+### 3.5 Klien kembali memperoleh alamat
+
+```
+udhcpc: broadcasting discover
+udhcpc: broadcasting select for 192.239.2.11, server 192.239.4.10
+udhcpc: lease of 192.239.2.11 obtained from 192.239.4.10, lease time 600
+inet 192.239.2.11/24 brd 192.239.2.255 scope global eth0
+default via 192.239.2.1 dev eth0
+```
+
+## 4. Perbandingan sebelum dan sesudah
+
+| Tahap | Relay | Hasil pada itadori |
+|---|---|---|
+| Normal | aktif | `192.239.2.11/24`, gateway `192.239.2.1` |
+| Gangguan | mati | discover berulang, `no lease`, tanpa IPv4 dan default route |
+| Pemulihan | aktif kembali | `192.239.2.11/24`, gateway `192.239.2.1` |
+
+IP berada dalam Pool 1 (`.2.10–.2.35`) dan gateway sama dengan kondisi awal.
+
+## 5. Kesimpulan
+
+Matinya relay pada jichi menghentikan seluruh pemberian alamat ke Network 2 dan 3 karena permintaan broadcast tidak dapat menyeberangi subnet. Setelah relay dipulihkan dengan konfigurasi `-id eth2 -id eth3 -iu eth4 192.239.4.10`, itadori kembali memperoleh lease dari tengen pada pool dan gateway yang benar.
+
+## 6. Pemulihan cepat
+
+```bash
+service isc-dhcp-relay start
+# jika gagal:
+/root/setup-jichi.sh
+```

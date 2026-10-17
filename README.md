@@ -675,7 +675,6 @@ Hasil terverifikasi sejauh ini:
 
 `/etc/resolv.conf` berisi `nameserver 192.239.1.2` dan `nameserver 192.239.1.3`.
 
-> Screenshot: `[01-ino.png]`, `[02-kusakabe.png]`, `[03-miwa.png]`
 
 ### 4.2 Bukti domain-search
 
@@ -687,8 +686,6 @@ tcpdump -vni eth0 port 67
 
 Lalu renew satu klien; pada paket ACK terlihat option Domain-Name-Server (6) dan Domain-Search (119) berisi `k56.com`.
 
-> Screenshot: `[04-tcpdump-option.png]`
-
 ### 4.3 Sisi server (tengen)
 
 ```bash
@@ -699,7 +696,9 @@ grep -E "^lease|hardware ethernet|ends" /var/lib/dhcp/dhcpd.leases
 
 Hasil yang diharapkan: exit code `0`, tidak ada lease pada `192.239.3.90 – .99`, dan lease miwa berdurasi jauh lebih panjang daripada ino dan kusakabe.
 
-> Screenshot: `[05-dhcpd-conf.png]`, `[06-leases.png]`
+> Screenshot:
+
+![Topologi](assets/modul3_5.png)
 
 ## 5. Kesimpulan
 

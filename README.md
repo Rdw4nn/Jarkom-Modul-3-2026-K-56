@@ -283,11 +283,8 @@ Hasil yang diharapkan:
 - Tidak ada pesan "No subnet declaration"
 - `dhcpd.conf` memuat tiga deklarasi subnet (4.0 kosong, 2.0, 3.0)
 
-> Screenshot:
-> - `[01-tengen-ip.png]` – IP tengen
-> - `[02-dhcpd-test.png]` – `dhcpd -t` exit code 0
-> - `[03-dhcpd-status.png]` – service running
-> - `[04-dhcpd-conf.png]` – isi `dhcpd.conf`
+Screenshot:
+![Topologi](assets/modul3_2.png)
 
 ## 5. Kesimpulan
 

@@ -1435,3 +1435,1134 @@ Pelajaran: kebijakan berbasis MAC bergantung pada MAC node GNS3 yang dapat berub
 ## 7. Kesimpulan
 
 Autostart dikonfigurasi dengan hook `post-up` karena container berjalan di bawah `dumb-init` tanpa systemd: DHCP Server pada tengen dan DHCP Relay (beserta IP forwarding dan NAT) pada jichi. Setelah restart, layanan aktif tanpa intervensi manual dan klien Network 2–3 kembali memperoleh alamat sesuai kebijakan Pool 1, Pool 2, short lease, long lease, dan fixed address.
+
+---
+### 11. Konfigurasi DNS Master–Slave Menggunakan BIND9
+---
+
+Pada nomor 11, dilakukan konfigurasi layanan DNS menggunakan BIND9 dengan **Utahime sebagai DNS Master** dan **Shoko sebagai DNS Slave** untuk domain `jujutsu.56.com`. DNS Master berfungsi menyimpan data zona utama, sedangkan DNS Slave menerima salinan data melalui mekanisme *zone transfer* sehingga kedua server dapat melayani permintaan DNS dengan informasi yang konsisten.
+
+Konfigurasi pada Utahime dilakukan dengan menentukan zona bertipe `master` dan memberikan izin transfer zona ke Shoko (`192.239.1.3`). Sementara itu, Shoko dikonfigurasikan sebagai `slave` yang memperoleh data zona dari Utahime (`192.239.1.2`).
+
+Contoh konfigurasi zona pada DNS Master adalah:
+
+```conf
+zone "jujutsu.56.com" {
+    type master;
+    file "/etc/bind/db.jujutsu.56.com";
+    allow-transfer { 192.239.1.3; };
+};
+```
+
+Sedangkan pada DNS Slave:
+
+```conf
+zone "jujutsu.56.com" {
+    type slave;
+    masters { 192.239.1.2; };
+    file "/var/cache/bind/db.jujutsu.56.com";
+};
+```
+
+Lokasi file tersebut merupakan contoh struktur konfigurasi BIND9. Lokasi aktual mengikuti konfigurasi script yang digunakan.
+
+Setelah konfigurasi selesai, dilakukan pengujian record SOA dan NS melalui kedua server DNS menggunakan perintah:
+
+```bash
+dig @192.239.1.2 jujutsu.56.com SOA +short
+dig @192.239.1.3 jujutsu.56.com SOA +short
+
+dig @192.239.1.2 jujutsu.56.com NS +short
+dig @192.239.1.3 jujutsu.56.com NS +short
+```
+
+Hasil pengujian SOA menunjukkan bahwa Utahime dan Shoko memberikan informasi zona yang sama, dengan server otoritatif `utahime.jujutsu.56.com` dan serial `2026101704`. Pengujian NS menunjukkan bahwa domain memiliki dua name server, yaitu `utahime.jujutsu.56.com` dan `shoko.jujutsu.56.com`.
+
+![Bukti pengujian record SOA dan NS pada DNS Master Utahime dan DNS Slave Shoko](assets/modul3_11.1.png)
+
+Berdasarkan hasil tersebut, kedua server berhasil memberikan jawaban DNS yang konsisten. Kesamaan serial SOA mendukung bahwa sinkronisasi zona antara Master dan Slave telah berjalan.
+
+---
+
+### 12. Konfigurasi DNS Record dan DNS Forwarding
+---
+
+Pada nomor 12, dilakukan konfigurasi DNS Record yang meliputi **A Record, CNAME, dan PTR**, serta DNS Forwarding untuk menerjemahkan domain eksternal. A Record berfungsi menghubungkan domain dengan alamat IPv4, CNAME membuat alias domain, sedangkan PTR digunakan untuk melakukan reverse lookup dari alamat IP menuju nama domain.
+
+Domain `jujutsu.56.com` diarahkan ke Gojo (`192.239.1.4`) sebagai pintu masuk layanan web. Domain `www.jujutsu.56.com` dikonfigurasikan sebagai alias dari domain utama.
+
+Pembagian record DNS adalah sebagai berikut.
+
+| Record | Nama | Hasil |
+|---|---|---|
+| A | `jujutsu.56.com` | `192.239.1.4` |
+| CNAME | `www.jujutsu.56.com` | `jujutsu.56.com` |
+| PTR | IP pada reverse zone | `jujutsu.56.com` |
+| Forwarder | `google.com` | Alamat IP publik |
+
+Contoh konfigurasi record pada zona DNS:
+
+```dns
+@     IN A      192.239.1.4
+www   IN CNAME  jujutsu.56.com.
+```
+
+DNS Forwarder diarahkan melalui DNS NAT GNS3 `192.168.122.1` agar DNS internal dapat melakukan resolusi domain eksternal.
+
+Pengujian A Record dilakukan dengan:
+
+```bash
+dig @192.239.1.2 jujutsu.56.com A +short
+dig @192.239.1.3 jujutsu.56.com A +short
+```
+
+Pengujian CNAME dilakukan menggunakan:
+
+```bash
+dig @192.239.1.2 www.jujutsu.56.com CNAME +short
+dig @192.239.1.3 www.jujutsu.56.com CNAME +short
+```
+
+Pengujian reverse DNS:
+
+```bash
+dig @192.239.1.2 -x 192.239.1.4 +short
+dig @192.239.1.3 -x 192.239.1.4 +short
+```
+
+Pengujian DNS Forwarder:
+
+```bash
+dig @192.239.1.2 google.com A +short
+dig @192.239.1.3 google.com A +short
+```
+
+Selanjutnya dilakukan pengujian konektivitas menggunakan:
+
+```bash
+ping -c 4 google.com
+```
+
+Hasil pengujian menunjukkan bahwa A Record dari kedua DNS menghasilkan IP `192.239.1.4`, sedangkan CNAME dan PTR menghasilkan `jujutsu.56.com.`. DNS Forwarder berhasil melakukan resolusi `google.com` ke beberapa alamat IP publik.
+
+Pengujian ping Google juga berhasil dengan empat paket dikirim dan empat paket diterima, sehingga diperoleh **packet loss sebesar 0%**. Pada pengujian tersebut, resolver internal yang digunakan adalah Utahime (`192.239.1.2`) dan Shoko (`192.239.1.3`).
+
+![Bukti pengujian A Record, CNAME, PTR, DNS Forwarder, dan ping Google](assets/modul3_12.1.png)
+
+---
+
+### 13. Konfigurasi Replikasi Database MariaDB Master–Slave
+---
+
+Pada nomor 13, dilakukan konfigurasi replikasi database menggunakan MariaDB dengan **Yaga sebagai Master** dan **Inumaki sebagai Slave**. Replikasi bertujuan menyinkronkan perubahan data pada Master secara otomatis ke Slave sehingga salinan database tetap tersedia pada server lain.
+
+Database yang digunakan adalah `db_shibuya_56` dengan tabel `request_logs`. Tabel tersebut berfungsi menyimpan catatan request API yang nantinya diproses oleh API worker.
+
+Struktur tabel adalah sebagai berikut.
+
+| Kolom | Tipe Data | Fungsi |
+|---|---|---|
+| `id` | `BIGINT UNSIGNED` | Identitas request |
+| `endpoint` | `VARCHAR(255)` | Endpoint API |
+| `method` | `VARCHAR(10)` | Metode HTTP |
+| `client_ip` | `VARCHAR(45)` | Alamat IP |
+| `created_at` | `TIMESTAMP` | Waktu pencatatan |
+
+MariaDB Master pada Yaga dikonfigurasikan dengan binary logging dan akun replikasi `replica56` untuk menghubungkan Slave ke Master.
+
+Pengujian status Master dilakukan menggunakan:
+
+```bash
+mariadb -e "SHOW MASTER STATUS\G"
+```
+
+Kemudian pemeriksaan database dilakukan menggunakan:
+
+```bash
+mariadb -e "SHOW DATABASES;"
+```
+
+Hasil pengujian menunjukkan binary log `no13-bin.000001` telah tersedia, dan database `db_shibuya_56` berhasil dibuat.
+
+![Bukti status MariaDB Master dan keberadaan database db_shibuya_56 pada Yaga](assets/modul3_13.1.png)
+
+Setelah memastikan database tersedia, dilakukan pengujian penambahan data pada Yaga dengan perintah:
+
+```sql
+USE db_shibuya_56;
+
+INSERT INTO request_logs (endpoint, method, client_ip)
+VALUES ('/api/tes13', 'GET', '192.239.4.10');
+
+SELECT * FROM request_logs;
+```
+
+Hasil menunjukkan satu baris berhasil ditambahkan dengan endpoint `/api/tes13`, method `GET`, serta alamat IP `192.239.4.10`.
+
+![Bukti penambahan data request_logs pada MariaDB Master Yaga](assets/modul3_13.2.png)
+
+Untuk memastikan replikasi berjalan, dilakukan pemeriksaan tabel pada Inumaki menggunakan:
+
+```bash
+mariadb db_shibuya_56
+```
+
+Kemudian:
+
+```sql
+SELECT * FROM request_logs;
+```
+
+Hasil menunjukkan data yang sebelumnya dimasukkan pada Yaga juga muncul pada Inumaki dengan informasi ID, endpoint, method, IP, dan waktu pencatatan yang sama.
+
+![Bukti hasil replikasi data request_logs dari Yaga ke Inumaki](assets/modul3_13.3.png)
+
+Selanjutnya, dilakukan pemeriksaan akses database dari Nanami sebagai salah satu API worker:
+
+```bash
+mariadb -h 192.239.4.9 -u api56 -p db_shibuya_56
+```
+
+Setelah terhubung, dilakukan pemeriksaan tabel menggunakan:
+
+```sql
+SHOW TABLES;
+SELECT * FROM request_logs;
+```
+
+Hasil pengujian menunjukkan tabel `request_logs` tersedia dan dapat diakses melalui koneksi database dari Nanami.
+
+![Bukti akses database Yaga dari API worker Nanami](assets/modul3_13.4(1).png)
+
+Status replikasi pada Inumaki juga diperiksa menggunakan:
+
+```bash
+mariadb -e "SHOW SLAVE STATUS\G"
+```
+
+Pada hasil pengujian, ditemukan parameter berikut:
+
+```text
+Master_Host: 192.239.4.9
+Slave_IO_Running: Yes
+Slave_SQL_Running: Yes
+Last_Errno: 0
+```
+
+Kondisi `Slave_IO_Running: Yes` menunjukkan proses penerimaan binary log dari Master berjalan, sedangkan `Slave_SQL_Running: Yes` menunjukkan proses penerapan perubahan database pada Slave juga aktif.
+
+![Bukti Slave IO dan SQL berjalan pada MariaDB Inumaki](assets/modul3_13.5.png)
+
+---
+
+### 14. Implementasi Frontend Nginx, PHP-FPM, dan API Worker
+---
+
+Pada nomor 14, dilakukan implementasi layanan frontend dan backend menggunakan Nginx serta PHP-FPM. Maki dan Panda berperan sebagai frontend worker yang menampilkan identitas hostname masing-masing, sedangkan Nanami, Todo, dan Kirara berperan sebagai API worker yang mencatat request ke database Yaga.
+
+Pembagian node dan layanan dapat dilihat pada tabel berikut.
+
+| Node | IP Address | Fungsi | Akses yang Diizinkan |
+|---|---|---|---|
+| Maki | `192.239.4.3` | Frontend | Gojo |
+| Panda | `192.239.4.4` | Frontend | Gojo |
+| Nanami | `192.239.4.5` | API Worker | Geto |
+| Todo | `192.239.4.6` | API Worker | Geto |
+| Kirara | `192.239.4.7` | API Worker | Geto |
+
+Frontend dibuat menggunakan PHP untuk menampilkan hostname masing-masing worker. Konfigurasi Nginx dibuat agar frontend hanya dapat diakses melalui jalur proxy Gojo, sedangkan API worker hanya dapat diakses dari Geto.
+
+Pada frontend, pembatasan akses diterapkan menggunakan:
+
+```nginx
+allow 192.239.1.4;
+deny all;
+```
+
+Sedangkan pada API worker:
+
+```nginx
+allow 192.239.4.2;
+deny all;
+```
+
+Layanan API menggunakan PHP dan ekstensi PDO MySQL untuk menghubungkan worker ke database `db_shibuya_56` pada Yaga. Setiap request yang berhasil diproses dicatat ke tabel `request_logs` dengan informasi endpoint, method, dan client IP.
+
+Pengujian frontend dilakukan melalui Gojo:
+
+```bash
+lynx -dump http://192.239.4.3/
+lynx -dump http://192.239.4.4/
+```
+
+Hasil pengujian menunjukkan bahwa Maki menampilkan `Server: maki`, sedangkan Panda menampilkan `Server: panda`. Kedua frontend berhasil menampilkan halaman web melalui Nginx dan PHP-FPM.
+
+![Bukti pengujian frontend Maki dan Panda melalui Gojo](assets/modul3_14.1.png)
+
+Selanjutnya dilakukan pengujian API melalui Geto menggunakan perintah:
+
+```bash
+lynx -dump http://192.239.4.5/api
+lynx -dump http://192.239.4.6/api
+lynx -dump http://192.239.4.7/api
+```
+
+Ketiga worker berhasil menghasilkan respons JSON dengan `status: success`, nama worker sesuai server yang diakses, dan `logged: true`.
+
+Contoh respons:
+
+```json
+{
+    "status": "success",
+    "worker": "nanami",
+    "endpoint": "/api",
+    "method": "GET",
+    "logged": true,
+    "request_id": "5"
+}
+```
+
+![Bukti pengujian API Nanami, Todo, dan Kirara melalui Geto](assets/modul3_14.2.png)
+
+Pengujian berikutnya dilakukan untuk memastikan klien tidak dapat mengakses worker secara langsung. Dari Itadori, dijalankan:
+
+```bash
+lynx -dump http://192.239.4.5/api
+lynx -dump http://192.239.4.3/
+lynx -dump http://192.239.4.4/
+```
+
+Hasilnya menunjukkan `403 Forbidden`, yang menandakan bahwa aturan pembatasan akses Nginx berhasil diterapkan. Worker hanya menerima request dari jalur proxy yang telah ditentukan.
+
+![Bukti pembatasan akses langsung dari Itadori menghasilkan HTTP 403 Forbidden](assets/modul3_14.3.png)
+
+---
+
+### 15. Implementasi Load Balancing API Menggunakan Weighted Round Robin
+---
+
+Pada nomor 15, dilakukan konfigurasi Nginx pada Geto sebagai load balancer untuk mendistribusikan request API ke Nanami dan Todo. Metode yang digunakan adalah **Weighted Round Robin**, yaitu mekanisme pembagian request berdasarkan nilai bobot masing-masing worker.
+
+Nanami diberikan bobot `weight=3`, sedangkan Todo diberikan `weight=1`, sehingga target distribusi request adalah sekitar 75% ke Nanami dan 25% ke Todo.
+
+Konfigurasi upstream pada Geto adalah:
+
+```nginx
+upstream api_cluster {
+    server 192.239.4.5:80 weight=3;
+    server 192.239.4.6:80 weight=1;
+}
+```
+
+Untuk meneruskan request menuju backend, digunakan konfigurasi reverse proxy pada Geto:
+
+```nginx
+location = /api {
+    proxy_pass http://api_cluster;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+Konfigurasi tersebut membuat klien yang mengakses endpoint `/api` pada Geto secara otomatis diteruskan ke salah satu API worker sesuai pembagian bobot.
+
+Pengujian awal dilakukan menggunakan:
+
+```bash
+lynx -dump http://192.239.4.2/api
+```
+
+Respons menunjukkan API berhasil diproses oleh salah satu worker dengan status `success`.
+
+Untuk membuktikan pembagian beban, dilakukan pengujian sebanyak 40 request menggunakan:
+
+```bash
+for i in $(seq 1 40); do
+    lynx -dump http://192.239.4.2/api |
+    awk -F '"' '/"worker"/ {print $4}'
+done | sort | uniq -c
+```
+
+Hasil pengujian adalah:
+
+```text
+31 nanami
+ 9 todo
+```
+
+Distribusi yang diperoleh dapat dilihat pada tabel berikut.
+
+| Worker | Weight | Target Request | Hasil Aktual | Persentase |
+|---|---|---:|---:|---:|
+| Nanami | 3 | 30 | 31 | 77,5% |
+| Todo | 1 | 10 | 9 | 22,5% |
+| **Total** | **4** | **40** | **40** | **100%** |
+
+Hasil tersebut mendekati rasio 3:1 yang telah dikonfigurasikan. Perbedaan kecil dapat terjadi akibat jumlah request terbatas dan kondisi backend pada saat pengujian.
+
+Selanjutnya dilakukan pemeriksaan konfigurasi Nginx menggunakan:
+
+```bash
+nginx -t
+```
+
+Serta:
+
+```bash
+grep -A 5 'upstream api_cluster' /etc/nginx/sites-available/no15
+```
+
+Hasil menunjukkan konfigurasi Nginx valid dan upstream menggunakan bobot `weight=3` untuk Nanami serta `weight=1` untuk Todo.
+
+![Bukti pengujian load balancing API dengan distribusi request 31 Nanami dan 9 Todo](assets/modul3_15.1.png)
+
+---
+
+
+### 16. Konfigurasi Reverse Proxy Nginx pada Gojo
+---
+
+Pada nomor 16, dilakukan konfigurasi **reverse proxy menggunakan Nginx pada Gojo** sebagai pintu masuk utama layanan web melalui domain `jujutsu.56.com` dan `www.jujutsu.56.com`. Reverse proxy berfungsi menerima request dari klien dan meneruskannya ke server backend sesuai jenis layanan yang diakses.
+
+Pada konfigurasi ini, request menuju halaman utama (`/`) diteruskan secara round robin ke frontend Maki dan Panda. Sementara itu, request menuju endpoint `/api` diteruskan ke Geto sebagai load balancer API yang telah dikonfigurasikan pada nomor 15.
+
+Pembagian layanan reverse proxy adalah sebagai berikut.
+
+| Akses | Server Tujuan | IP Address | Fungsi |
+|---|---|---|---|
+| `jujutsu.56.com` | Gojo | `192.239.1.4` | Reverse proxy utama |
+| `/` | Maki | `192.239.4.3` | Frontend worker |
+| `/` | Panda | `192.239.4.4` | Frontend worker |
+| `/api` | Geto | `192.239.4.2` | Load balancer API |
+| API Worker | Nanami dan Todo | `192.239.4.5–6` | Pemrosesan API |
+
+Konfigurasi upstream frontend pada Gojo menggunakan:
+
+```nginx
+upstream frontend_cluster {
+    server 192.239.4.3:80;
+    server 192.239.4.4:80;
+}
+```
+
+Kedua server memiliki bobot yang sama sehingga Nginx dapat membagikan request secara round robin.
+
+Konfigurasi reverse proxy diterapkan melalui virtual host:
+
+```nginx
+server {
+    listen 80 default_server;
+
+    server_name jujutsu.56.com www.jujutsu.56.com;
+
+    location = /api {
+        proxy_pass http://192.239.4.2:80;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location ^~ /api/ {
+        proxy_pass http://192.239.4.2:80;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://frontend_cluster;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Setelah konfigurasi diaktifkan, dilakukan pengujian DNS dari Itadori menggunakan perintah:
+
+```bash
+dig @192.239.1.2 jujutsu.56.com A +short
+
+dig @192.239.1.2 www.jujutsu.56.com +short
+```
+
+Hasil pengujian menunjukkan domain utama dan subdomain `www` mengarah ke Gojo dengan alamat `192.239.1.4`.
+
+Pengujian akses frontend dilakukan menggunakan:
+
+```bash
+lynx -dump http://jujutsu.56.com/
+```
+
+Untuk menguji distribusi request frontend, digunakan:
+
+```bash
+for i in $(seq 1 8); do
+    lynx -dump http://jujutsu.56.com/ |
+    grep 'Server:'
+done
+```
+
+Hasil pengujian menunjukkan bahwa request berhasil dilayani oleh Maki dan Panda. Dari delapan request yang dilakukan, Maki menerima enam request dan Panda menerima dua request. Kedua worker berhasil memberikan respons frontend sesuai hostname masing-masing.
+
+Selanjutnya dilakukan pengujian subdomain:
+
+```bash
+lynx -dump http://www.jujutsu.56.com/
+```
+
+Hasil menunjukkan halaman frontend berhasil ditampilkan melalui subdomain `www`.
+
+Untuk menguji reverse proxy API, digunakan:
+
+```bash
+lynx -dump http://jujutsu.56.com/api
+```
+
+Hasil pengujian menunjukkan respons API berstatus `success` dengan worker `todo` dan `logged: true`. Hal ini membuktikan bahwa request API berhasil diteruskan melalui Gojo menuju Geto dan diproses oleh API worker.
+
+![Bukti pengujian domain utama, distribusi frontend, subdomain www, dan reverse proxy API dari Itadori](assets/modul3_16.1.png)
+
+Selanjutnya, dilakukan pemeriksaan database pada Yaga untuk memastikan request API yang dikirim melalui Gojo berhasil dicatat.
+
+Perintah pengujian:
+
+```sql
+USE db_shibuya_56;
+
+SELECT id, endpoint, method, client_ip
+FROM request_logs
+ORDER BY id DESC
+LIMIT 10;
+```
+
+Hasil pengujian menunjukkan request terbaru dengan endpoint `/api`, method `GET`, dan alamat IP `192.239.4.2`, yaitu IP Geto sebagai proxy terakhir sebelum API worker. Pada tahap nomor 16, pencatatan IP tersebut masih sesuai karena penerusan alamat IP asli klien akan diterapkan pada nomor 17.
+
+![Bukti pencatatan request API melalui reverse proxy Gojo ke database Yaga](assets/modul3_16.2.png)
+
+---
+
+### 17. Implementasi Real Client IP pada Reverse Proxy
+---
+
+Pada nomor 17, dilakukan implementasi **Real Client IP** agar alamat IP asli klien dapat diteruskan melalui beberapa lapisan reverse proxy dan dicatat pada database Yaga.
+
+Sebelum konfigurasi ini diterapkan, API worker membaca alamat IP dari koneksi langsung menggunakan `REMOTE_ADDR`. Karena request API diteruskan melalui Geto, database mencatat alamat IP Geto (`192.239.4.2`), bukan alamat IP klien sebenarnya.
+
+Untuk mengatasi masalah tersebut, diterapkan forwarding header `X-Real-IP` dan `X-Forwarded-For` pada Gojo dan Geto. Pengaturan trusted proxy digunakan agar informasi IP dari header hanya dipercaya jika berasal dari proxy yang diizinkan.
+
+Konfigurasi forwarding header pada Gojo menggunakan:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```
+
+Pada Geto, Gojo dikonfigurasikan sebagai trusted proxy menggunakan:
+
+```nginx
+set_real_ip_from 192.239.1.4;
+real_ip_header X-Real-IP;
+```
+
+Konfigurasi tersebut membuat Geto hanya menggunakan informasi `X-Real-IP` dari koneksi yang berasal dari Gojo.
+
+Selanjutnya, API worker dikonfigurasikan untuk membaca alamat IP asli yang diteruskan oleh Geto.
+
+Bagian kode PHP untuk penentuan IP klien adalah:
+
+```php
+$peerIp = $_SERVER['REMOTE_ADDR'] ?? '';
+$realIp = $_SERVER['HTTP_X_REAL_IP'] ?? '';
+
+$clientIp = (
+    $peerIp === '192.239.4.2'
+    && filter_var($realIp, FILTER_VALIDATE_IP)
+) ? $realIp : $peerIp;
+```
+
+Kode tersebut hanya mempercayai informasi `X-Real-IP` ketika request berasal dari Geto (`192.239.4.2`). Nilai IP yang diperoleh kemudian disimpan pada kolom `client_ip` dalam tabel `request_logs`.
+
+Pengujian pertama dilakukan menggunakan klien **Itadori** yang berada pada Network 2.
+
+Alamat IP Itadori diperiksa menggunakan:
+
+```bash
+ip -4 -br addr show eth0
+```
+
+Hasilnya menunjukkan:
+
+```text
+eth0 UNKNOWN 192.239.2.10/24
+```
+
+Kemudian dilakukan request API:
+
+```bash
+lynx -dump http://jujutsu.56.com/api
+```
+
+Hasil menunjukkan API berhasil diproses oleh Nanami dengan `status: success`, `logged: true`, dan `request_id: 50`.
+
+![Bukti pengujian API dari Itadori dengan alamat IP 192.239.2.10](assets/modul3_17.1.png)
+
+Selanjutnya dilakukan pemeriksaan database Yaga menggunakan:
+
+```sql
+SELECT id, endpoint, method, client_ip
+FROM request_logs
+ORDER BY id DESC
+LIMIT 5;
+```
+
+Hasil menunjukkan request dengan ID 50 telah mencatat alamat IP `192.239.2.10`, sesuai dengan IP asli Itadori. Hal ini berbeda dengan request sebelumnya yang masih mencatat IP Geto `192.239.4.2`.
+
+![Bukti database Yaga mencatat alamat IP asli Itadori](assets/modul3_17.2.png)
+
+Pengujian berikutnya dilakukan dari **Miwa** sebagai klien Network 3, untuk membuktikan bahwa pencatatan Real Client IP tidak hanya bekerja pada satu segmen jaringan.
+
+Pemeriksaan IP Miwa:
+
+```bash
+ip -4 -br addr show eth0
+```
+
+Hasil:
+
+```text
+eth0 UNKNOWN 192.239.3.100/24
+```
+
+Kemudian dilakukan akses API:
+
+```bash
+lynx -dump http://jujutsu.56.com/api
+```
+
+Respons API menunjukkan `status: success`, `worker: nanami`, `logged: true`, dan `request_id: 51`.
+
+Pada database Yaga, request ID 51 tercatat dengan IP `192.239.3.100`. Dengan demikian, dua klien dari subnet berbeda berhasil dicatat menggunakan alamat IP aslinya masing-masing.
+
+![Bukti pengujian Real Client IP dari Miwa dan pencatatan alamat IP pada database Yaga](assets/modul3_17.3.png)
+
+Hasil pencatatan IP klien adalah sebagai berikut.
+
+| Request ID | Klien | IP Address | Keterangan |
+|---|---|---|---|
+| 49 | Request sebelum nomor 17 | `192.239.4.2` | IP Geto |
+| 50 | Itadori | `192.239.2.10` | IP asli klien |
+| 51 | Miwa | `192.239.3.100` | IP asli klien |
+
+Sebagai pengujian tambahan, dilakukan akses langsung dari Itadori menuju API worker Nanami:
+
+```bash
+lynx -dump http://192.239.4.5/api
+```
+
+Hasil pengujian menunjukkan `403 Forbidden`, yang membuktikan bahwa pembatasan akses langsung pada nomor 14 tetap berfungsi setelah konfigurasi Real Client IP diterapkan.
+
+![Bukti akses langsung Itadori ke API worker Nanami tetap ditolak menggunakan HTTP 403 Forbidden](assets/modul3_17.4.png)
+
+---
+
+### 18. Implementasi Failover API Menggunakan Backup Worker
+---
+
+Pada nomor 18, dilakukan konfigurasi **failover API** pada load balancer Geto untuk menjaga ketersediaan layanan ketika API worker utama mengalami gangguan.
+
+Dalam konfigurasi ini, Nanami dan Todo digunakan sebagai primary worker, sedangkan Kirara dikonfigurasikan sebagai backup worker. Kirara hanya digunakan ketika seluruh primary worker dinyatakan tidak tersedia oleh Nginx.
+
+Pengaturan worker adalah sebagai berikut.
+
+| Worker | IP Address | Peran | Konfigurasi |
+|---|---|---|---|
+| Nanami | `192.239.4.5` | Primary | `weight=3` |
+| Todo | `192.239.4.6` | Primary | `weight=1` |
+| Kirara | `192.239.4.7` | Backup | `backup` |
+
+Konfigurasi upstream pada Geto menggunakan:
+
+```nginx
+upstream api_cluster {
+    server 192.239.4.5:80 weight=3 max_fails=2 fail_timeout=5s;
+    server 192.239.4.6:80 weight=1 max_fails=2 fail_timeout=5s;
+    server 192.239.4.7:80 backup;
+}
+```
+
+Parameter `max_fails=2` menentukan ambang kegagalan worker dalam interval yang ditentukan oleh `fail_timeout=5s`. Sementara itu, parameter `backup` membuat Kirara hanya menerima request ketika primary worker tidak tersedia.
+
+Untuk mendukung proses failover, Geto juga menggunakan konfigurasi:
+
+```nginx
+proxy_next_upstream error timeout http_502 http_503 http_504;
+proxy_next_upstream_tries 3;
+proxy_connect_timeout 2s;
+proxy_read_timeout 5s;
+```
+
+Konfigurasi tersebut memungkinkan Nginx mencoba upstream lain apabila terjadi kegagalan koneksi, timeout, atau respons kesalahan upstream yang dikonfigurasikan untuk retry.
+
+Pengujian dilakukan dengan mensimulasikan kegagalan API worker secara bertahap.
+
+#### Pengujian 1 — Seluruh Primary Worker Aktif
+
+Pada kondisi awal, Nanami dan Todo dibiarkan aktif. Pengujian dilakukan melalui Itadori menggunakan:
+
+```bash
+lynx -dump http://jujutsu.56.com/api
+```
+
+Hasil menunjukkan respons API berstatus `success` yang diproses oleh Nanami.
+
+![Bukti pengujian API pada kondisi seluruh primary worker aktif](assets/modul3_18.1.png)
+
+Selanjutnya, pengujian distribusi delapan request dilakukan pada Geto menggunakan:
+
+```bash
+for i in $(seq 1 8); do
+    lynx -dump http://192.239.4.2/api |
+    awk -F '"' '/"worker"/ {print $4}'
+done | sort | uniq -c
+```
+
+Hasil menunjukkan:
+
+```text
+7 nanami
+1 todo
+```
+
+Kedua primary worker masih menerima request, sedangkan Kirara belum digunakan.
+
+![Bukti distribusi request API pada kondisi normal melalui Nanami dan Todo](assets/modul3_18.2.png)
+
+#### Pengujian 2 — Nanami Mengalami Gangguan
+
+Untuk mensimulasikan kegagalan primary worker pertama, layanan Nginx pada Nanami dihentikan menggunakan:
+
+```bash
+nginx -s stop
+```
+
+Perintah tersebut menghentikan web server Nanami sehingga worker tidak lagi dapat menerima request HTTP.
+
+![Bukti penghentian layanan Nginx pada API worker Nanami](assets/modul3_18.3.png)
+
+Selanjutnya dilakukan pengujian delapan request kembali dari Geto:
+
+```bash
+for i in $(seq 1 8); do
+    lynx -dump http://192.239.4.2/api |
+    awk -F '"' '/"worker"/ {print $4}'
+done | sort | uniq -c
+```
+
+Hasil menunjukkan:
+
+```text
+8 todo
+```
+
+Seluruh request berhasil dialihkan ke Todo setelah Nanami tidak tersedia. Kirara belum digunakan karena masih terdapat satu primary worker yang aktif.
+
+![Bukti seluruh request dialihkan ke Todo setelah Nanami dihentikan](assets/modul3_18.4.png)
+
+#### Pengujian 3 — Nanami dan Todo Mengalami Gangguan
+
+Setelah Nanami dihentikan, pengujian dilanjutkan dengan menghentikan Nginx pada Todo menggunakan:
+
+```bash
+nginx -s stop
+```
+
+Dengan kondisi tersebut, kedua primary worker dinyatakan tidak tersedia untuk menerima request.
+
+![Bukti penghentian layanan Nginx pada API worker Todo](assets/modul3_18.5.png)
+
+Pengujian kembali dilakukan dari Geto menggunakan:
+
+```bash
+for i in $(seq 1 8); do
+    lynx -dump http://192.239.4.2/api |
+    awk -F '"' '/"worker"/ {print $4}'
+done | sort | uniq -c
+```
+
+Hasil pengujian menunjukkan:
+
+```text
+8 kirara
+```
+
+Artinya seluruh request berhasil dialihkan ke Kirara sebagai backup worker.
+
+![Bukti delapan request API berhasil dialihkan seluruhnya ke Kirara](assets/modul3_18.6.png)
+
+Untuk memastikan failover juga berjalan melalui domain utama, dilakukan pengujian dari Itadori menggunakan:
+
+```bash
+lynx -dump http://jujutsu.56.com/api
+```
+
+Hasil menunjukkan respons:
+
+```json
+{
+    "status": "success",
+    "worker": "kirara",
+    "endpoint": "/api",
+    "method": "GET",
+    "logged": true,
+    "request_id": "77"
+}
+```
+
+Respons tersebut membuktikan bahwa layanan API tetap tersedia melalui domain utama meskipun Nanami dan Todo sedang dihentikan.
+
+![Bukti request API melalui domain utama berhasil diproses oleh backup worker Kirara](assets/modul3_18.7.png)
+
+#### Pengujian 4 — Verifikasi Database dan Real Client IP
+
+Setelah failover berlangsung, dilakukan pemeriksaan database pada Yaga menggunakan:
+
+```sql
+SELECT id, endpoint, method, client_ip
+FROM request_logs
+ORDER BY id DESC
+LIMIT 5;
+```
+
+Hasil menunjukkan bahwa request API selama pengujian tetap dapat dicatat pada database, termasuk request ID 77 dan 78 dengan alamat IP asli Itadori `192.239.2.10`.
+
+Hal ini menunjukkan bahwa mekanisme Real Client IP pada nomor 17 tetap berfungsi ketika API diproses oleh backup worker Kirara.
+
+![Bukti pencatatan request API dan Real Client IP pada database Yaga selama failover](assets/modul3_18.8.png)
+
+Setelah pengujian selesai, layanan Nginx pada Nanami dan Todo diaktifkan kembali menggunakan:
+
+```bash
+nginx
+```
+
+Setelah masa kegagalan berlalu, request kembali dapat diproses oleh primary worker sesuai konfigurasi load balancing.
+
+---
+
+### 19. Implementasi Proxy Cache dan Rate Limiting
+---
+
+Pada nomor 19, dilakukan implementasi **Proxy Cache dan Rate Limiting pada reverse proxy Gojo**. Kedua mekanisme ini bertujuan meningkatkan efisiensi layanan frontend dan mengendalikan jumlah request API yang diterima server.
+
+Proxy Cache memungkinkan Gojo menyimpan respons frontend untuk digunakan kembali pada request berikutnya, sedangkan Rate Limiting membatasi request ke endpoint `/api` berdasarkan alamat IP klien.
+
+Konfigurasi yang diterapkan adalah:
+
+| Fitur | Pengaturan | Tujuan |
+|---|---|---|
+| Proxy Cache | 10 menit | Mengurangi request berulang ke frontend |
+| Cache Status | `X-Cache-Status` | Menampilkan MISS atau HIT |
+| Rate Limiting | 10 request/detik/IP | Membatasi request API |
+| Burst | 5 request | Toleransi lonjakan singkat |
+| Status Penolakan | HTTP 429 | Menolak request berlebihan |
+
+#### Konfigurasi Proxy Cache
+
+Konfigurasi cache dilakukan pada Nginx Gojo menggunakan:
+
+```nginx
+proxy_cache_path /var/cache/nginx/no19
+    levels=1:2
+    keys_zone=no19_frontend:10m
+    max_size=100m
+    inactive=10m
+    use_temp_path=off;
+```
+
+Kemudian pada lokasi frontend digunakan:
+
+```nginx
+location / {
+    proxy_pass http://frontend_cluster;
+
+    proxy_cache no19_frontend;
+    proxy_cache_valid 200 10m;
+
+    proxy_cache_key "$scheme$host$request_uri";
+
+    add_header X-Cache-Status $upstream_cache_status always;
+}
+```
+
+Konfigurasi tersebut membuat respons HTTP 200 dari frontend dapat disimpan selama 10 menit sesuai aturan validitas cache.
+
+Ketika halaman belum tersedia dalam cache, Nginx mengambil respons dari Maki atau Panda dan menampilkan status `MISS`. Pada request berikutnya dengan cache key yang sama, Nginx dapat menggunakan respons yang tersimpan dan menampilkan status `HIT`.
+
+Pengujian dilakukan dari Itadori menggunakan:
+
+```bash
+for i in 1 2 3 4; do
+    echo "Request $i"
+
+    wget -S -O /dev/null \
+    "http://jujutsu.56.com/?tes=cache19baru2" \
+    2>&1 | grep -i 'X-Cache-Status'
+done
+```
+
+Hasil pengujian yang diperoleh:
+
+```text
+Request 1
+X-Cache-Status: MISS
+
+Request 2
+X-Cache-Status: HIT
+
+Request 3
+X-Cache-Status: HIT
+
+Request 4
+X-Cache-Status: HIT
+```
+
+Pada pengujian diperoleh status `MISS` ketika halaman belum tersedia dalam cache dan `HIT` pada akses berikutnya. Hasil tersebut menunjukkan mekanisme penyimpanan dan penggunaan ulang respons frontend berjalan.
+
+#### Konfigurasi Rate Limiting
+
+Rate Limiting diterapkan untuk membatasi request ke endpoint `/api` sebesar 10 request per detik untuk setiap alamat IP klien.
+
+Konfigurasi zona Rate Limiting pada Nginx menggunakan:
+
+```nginx
+limit_req_zone $binary_remote_addr
+    zone=no19_api:10m
+    rate=10r/s;
+```
+
+Sedangkan pada lokasi API diterapkan:
+
+```nginx
+limit_req zone=no19_api burst=5 nodelay;
+limit_req_status 429;
+```
+
+Konfigurasi ini memungkinkan Gojo melakukan pembatasan berdasarkan alamat IP. Request yang melebihi batas dan toleransi burst akan ditolak menggunakan respons `429 Too Many Requests`.
+
+Pengujian pertama dilakukan untuk memastikan API tetap berjalan pada kondisi normal:
+
+```bash
+lynx -dump http://jujutsu.56.com/api
+```
+
+Hasil menunjukkan:
+
+```json
+{
+    "status": "success",
+    "worker": "todo",
+    "endpoint": "/api",
+    "method": "GET",
+    "logged": true,
+    "request_id": "79"
+}
+```
+
+Selanjutnya dilakukan pengujian 100 request paralel dari Itadori menggunakan:
+
+```bash
+seq 1 100 | xargs -P 30 -I '{}' sh -c \
+'wget -S -O /dev/null http://jujutsu.56.com/api 2>&1 | grep -E "HTTP/1\.[01] (200|429)"' \
+| sort | uniq -c
+```
+
+Hasil pengujian menunjukkan:
+
+```text
+7   HTTP/1.1 200 OK
+93  HTTP/1.1 429 Too Many Requests
+```
+
+Berdasarkan hasil tersebut, hanya tujuh request memperoleh respons HTTP 200, sedangkan 93 request lainnya ditolak dengan HTTP 429 akibat pembatasan trafik API.
+
+Persentase hasil pengujian:
+
+| Respons | Jumlah | Persentase |
+|---|---:|---:|
+| HTTP 200 OK | 7 | 7% |
+| HTTP 429 Too Many Requests | 93 | 93% |
+| **Total** | **100** | **100%** |
+
+Hasil tersebut menunjukkan Rate Limiting telah aktif dan mampu menolak lonjakan request yang melebihi batas konfigurasi.
+
+Pemeriksaan konfigurasi Nginx dilakukan pada Gojo menggunakan:
+
+```bash
+nginx -t
+```
+
+Serta:
+
+```bash
+nginx -T 2>&1 | grep -E \
+'proxy_cache|X-Cache-Status|limit_req|no19_api'
+```
+
+Hasil pemeriksaan menunjukkan konfigurasi cache dan Rate Limiting telah dimuat serta sintaks Nginx dinyatakan valid.
+
+---
+
+### 20. Pengujian Performa Menggunakan ApacheBench
+---
+
+Pada nomor 20, dilakukan pengujian performa layanan web menggunakan **ApacheBench (`ab`)** dari node Kusakabe. Pengujian bertujuan mengukur kemampuan frontend dan API dalam menangani sejumlah request secara bersamaan setelah konfigurasi reverse proxy, load balancing, proxy cache, dan Rate Limiting diterapkan.
+
+Pengujian dilakukan terhadap domain `jujutsu.56.com` dengan parameter **600 request dan concurrency 30**.
+
+Parameter pengujian adalah sebagai berikut.
+
+| Parameter | Nilai | Keterangan |
+|---|---|---|
+| Jumlah Request | 600 | Total request yang dikirim |
+| Concurrency | 30 | Maksimal request bersamaan |
+| Frontend | `http://jujutsu.56.com/` | Pengujian halaman utama |
+| API | `http://jujutsu.56.com/api` | Pengujian API melalui Geto |
+| Tool | ApacheBench | Pengujian beban HTTP |
+| Node Penguji | Kusakabe | Klien benchmark |
+
+ApacheBench digunakan karena mampu mengukur beberapa parameter performa, seperti throughput, waktu respons, jumlah request yang selesai, dan kegagalan selama pengujian.
+
+#### Pengujian 1 — Benchmark Frontend
+
+Pengujian frontend dilakukan dari terminal Kusakabe menggunakan:
+
+```bash
+ab -n 600 -c 30 http://jujutsu.56.com/
+```
+
+Hasil pengujian dapat disimpan dan diperiksa melalui:
+
+```bash
+cat /root/no20-results/frontend.txt
+```
+
+Atau untuk menampilkan ringkasan:
+
+```bash
+grep -E 'Complete requests:|Failed requests:|Requests per second:|Time per request:|Non-2xx responses:' /root/no20-results/frontend.txt
+```
+
+Hasil benchmark frontend menunjukkan:
+
+| Parameter | Hasil |
+|---|---:|
+| Complete Requests | 600 |
+| Failed Requests | 0 |
+| Requests per Second | 5.326,80 req/s |
+| Time per Request | 5,632 ms |
+| Time Taken for Tests | 0,113 detik |
+| Document Length | 1.166 bytes |
+| Maximum Response Time | 8 ms |
+
+Sebanyak 600 request berhasil diselesaikan tanpa kegagalan yang terdeteksi ApacheBench. Throughput mencapai 5.326,80 request per detik dengan rata-rata waktu per request sebesar 5,632 ms pada concurrency 30.
+
+Nilai tersebut menunjukkan bahwa frontend mampu melayani seluruh beban pengujian dengan respons yang cepat dalam kondisi proxy cache aktif.
+
+![Bukti hasil pengujian performa frontend menggunakan ApacheBench dengan 600 request dan concurrency 30](assets/modul3_20.1.png)
+
+#### Pengujian 2 — Benchmark API
+
+Pengujian selanjutnya dilakukan terhadap endpoint `/api` menggunakan:
+
+```bash
+ab -n 600 -c 30 http://jujutsu.56.com/api
+```
+
+Hasil benchmark diperiksa melalui:
+
+```bash
+cat /root/no20-results/api.txt
+```
+
+Untuk melihat informasi kegagalan request secara lebih rinci, digunakan:
+
+```bash
+grep -A 8 'Failed requests:' /root/no20-results/api.txt
+```
+
+Hasil pengujian API menunjukkan:
+
+| Parameter | Hasil |
+|---|---:|
+| Complete Requests | 600 |
+| Failed Requests | 594 |
+| Non-2xx Responses | 593 |
+| Requests per Second | 4.389,82 req/s |
+| Time per Request | 6,834 ms |
+| Time Taken for Tests | 0,137 detik |
+| Document Length | 142 bytes |
+| Maximum Response Time | 26 ms |
+
+Dari total 600 request yang diselesaikan, sebanyak 593 respons termasuk kategori non-2xx. Hasil ini konsisten dengan adanya pembatasan trafik API melalui Rate Limiting pada Gojo.
+
+ApacheBench juga mencatat sebanyak 594 failed requests dengan rincian:
+
+```text
+Failed requests: 594
+(Connect: 0, Receive: 0, Length: 594, Exceptions: 0)
+
+Non-2xx responses: 593
+```
+
+Nilai `Connect: 0` menunjukkan tidak terdapat kegagalan koneksi yang terdeteksi, sedangkan `Receive: 0` menunjukkan tidak terdapat kegagalan penerimaan respons.
+
+Sebanyak 594 kegagalan diklasifikasikan sebagai `Length`, yaitu perbedaan panjang respons dibandingkan panjang respons acuan ApacheBench. Hal ini dapat dipengaruhi oleh perbedaan konten respons API normal dan halaman penolakan HTTP 429, maupun perubahan panjang JSON.
+
+Dengan demikian, nilai `Failed requests` tidak dapat langsung diartikan sebagai jumlah kegagalan koneksi jaringan.
+
+![Bukti hasil benchmark API serta rincian Failed Requests dan Non-2xx Responses pada ApacheBench](assets/modul3_20.2.png)
+
+#### Perbandingan Performa Frontend dan API
+
+Ringkasan hasil kedua pengujian adalah sebagai berikut.
+
+| Parameter | Frontend | API |
+|---|---:|---:|
+| Complete Requests | 600 | 600 |
+| Concurrency | 30 | 30 |
+| Failed Requests | 0 | 594 |
+| Non-2xx Responses | 0 | 593 |
+| Throughput | 5.326,80 req/s | 4.389,82 req/s |
+| Time per Request | 5,632 ms | 6,834 ms |
+| Total Waktu | 0,113 detik | 0,137 detik |
+
+Berdasarkan hasil tersebut, throughput frontend lebih tinggi dibandingkan API. Frontend juga menunjukkan waktu respons rata-rata yang lebih rendah.
+
+Perbedaan ini berkaitan dengan karakteristik layanan yang diuji. Frontend dapat menggunakan respons yang tersimpan pada proxy cache, sedangkan API memerlukan pemrosesan backend dan pencatatan request ke database untuk request yang diizinkan.
+
+Selain itu, pembatasan request pada endpoint `/api` menyebabkan banyak respons non-2xx. Oleh karena itu, throughput ApacheBench pada pengujian API mencakup respons HTTP yang berhasil diselesaikan oleh server, termasuk respons penolakan, dan tidak dapat diartikan sebagai jumlah transaksi API sukses per detik.
+
+Untuk mengonfirmasi mekanisme Rate Limiting, dilakukan pemeriksaan log Nginx pada Gojo menggunakan:
+
+```bash
+grep 'limiting requests' /var/log/nginx/error.log | tail -10
+```
+
+Hasil log menunjukkan request dari IP Kusakabe (`192.239.2.11`) dibatasi melalui zona `no19_api`, sehingga mendukung hasil benchmark API yang menghasilkan banyak respons non-2xx.
+

@@ -528,7 +528,7 @@ Hasil terverifikasi sejauh ini:
 - okkotsu: `192.239.2.70` (Pool 2)
 - zenin: diverifikasi ulang setelah MAC diperbarui
 
-> Screenshot: `[01-itadori.png]`, `[02-fushiguro.png]`, `[03-zenin.png]`, `[04-okkotsu.png]`
+> Screenshot: ![Topologi](assets/modul3_4.2.png)
 
 ### 4.2 Sisi server (tengen)
 
@@ -540,7 +540,9 @@ grep -E "^lease|hardware ethernet|^  binding state" /var/lib/dhcp/dhcpd.leases
 
 Hasil yang diharapkan: konfigurasi memuat class dan dua pool, exit code `0`, dan tidak ada lease pada `192.239.2.36 – .69`.
 
-> Screenshot: `[05-dhcpd-conf.png]`, `[06-dhcpd-test.png]`, `[07-leases.png]`
+> Screenshot:
+![Topologi](assets/modul13_4.png)
+![Topologi](assets/modul13_4.1.png)
 
 ## 5. Kesimpulan
 

@@ -541,8 +541,9 @@ grep -E "^lease|hardware ethernet|^  binding state" /var/lib/dhcp/dhcpd.leases
 Hasil yang diharapkan: konfigurasi memuat class dan dua pool, exit code `0`, dan tidak ada lease pada `192.239.2.36 – .69`.
 
 > Screenshot:
-![Topologi](assets/modul13_4.png)
-![Topologi](assets/modul13_4.1.png)
+
+![Topologi](assets/modul3_4.png)
+![Topologi](assets/modul3_4.1.png)
 
 ## 5. Kesimpulan
 

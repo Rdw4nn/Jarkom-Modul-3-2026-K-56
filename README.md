@@ -838,3 +838,154 @@ grep -A3 "host kugisaki" /etc/dhcp/dhcpd.conf   # di tengen
 ```
 
 Lalu jalankan ulang `/root/setup-tengen.sh` dan renew pada kugisaki.
+
+
+# Soal 7 – Verifikasi Konfigurasi Jaringan Klien
+
+Kelompok: K56 | Prefix IP: `192.239`
+
+## 1. Tujuan
+
+Setelah aturan alokasi diterapkan, setiap klien harus menerima konfigurasi jaringan sesuai wilayahnya:
+
+- Subnet mask `255.255.255.0` (/24)
+- Gateway dan broadcast address yang benar
+- DNS `192.239.1.2` dan `192.239.1.3`
+- Domain-search yang ditentukan (`k56.com`)
+- Mencocokkan lease klien Divisi A dan B dengan `/var/lib/dhcp/dhcpd.leases` pada tengen
+- Memastikan tidak ada alamat bertabrakan atau di luar kebijakan pool
+
+## 2. Perbaikan konfigurasi sebelum verifikasi
+
+Pada `dhcpd.conf` sebelumnya, subnet Network 2 belum memiliki DNS dan domain-search, dan kedua subnet belum memiliki broadcast address. Ditambahkan pada `/root/setup-tengen.sh`:
+
+```
+# Network 2
+option broadcast-address 192.239.2.255;
+option domain-name-servers 192.239.1.2, 192.239.1.3;
+option domain-search "k56.com";
+
+# Network 3
+option broadcast-address 192.239.3.255;
+option domain-name-servers 192.239.1.2, 192.239.1.3;
+option domain-search "k56.com";
+```
+
+Penambahan dilakukan dengan `sed` pada baris `option routers`, lalu diverifikasi:
+
+```bash
+grep -n "broadcast\|domain" /root/setup-tengen.sh
+```
+
+Hasil: terdapat dua baris broadcast, dua baris DNS, dan dua baris domain-search (Network 2 dan Network 3). Script dijalankan ulang dan lease direset:
+
+```bash
+/root/setup-tengen.sh
+dhcpd -t -cf /etc/dhcp/dhcpd.conf; echo "exit code: $?"
+service isc-dhcp-server stop; : > /var/lib/dhcp/dhcpd.leases; service isc-dhcp-server start
+```
+
+`dhcpd -t` menghasilkan `exit code: 0` dan service berjalan.
+
+## 3. Ketentuan yang diharapkan
+
+| Klien | Network | Rentang IP | Gateway | Broadcast | Lease time |
+|---|---|---|---|---|---|
+| itadori, fushiguro | 2 | 192.239.2.10 – .35 | 192.239.2.1 | 192.239.2.255 | 600 |
+| zenin, okkotsu | 2 | 192.239.2.70 – .95 | 192.239.2.1 | 192.239.2.255 | 600 |
+| ino, kusakabe | 3 | 192.239.3.10 – .89 | 192.239.3.1 | 192.239.3.255 | 1800 |
+| miwa | 3 | 192.239.3.100 – .199 | 192.239.3.1 | 192.239.3.255 | 43200 |
+| kugisaki | 3 | 192.239.3.99 (fixed) | 192.239.3.1 | 192.239.3.255 | 600 |
+
+Semua klien: mask /24, DNS `192.239.1.2` dan `192.239.1.3`, domain-search `k56.com`.
+
+## 4. Pemeriksaan pada klien
+
+Dijalankan pada kedelapan klien:
+
+```bash
+ifdown eth0; ifup eth0
+ip -4 addr show eth0
+ip route
+cat /etc/resolv.conf
+```
+
+### Contoh hasil: fushiguro
+
+```
+udhcpc: lease of 192.239.2.14 obtained from 192.239.4.10, lease time 600
+inet 192.239.2.14/24 brd 192.239.2.255 scope global eth0
+default via 192.239.2.1 dev eth0
+192.239.2.0/24 dev eth0 proto kernel scope link src 192.239.2.14
+nameserver 192.239.1.2
+nameserver 192.239.1.3
+```
+
+Hasil ini sesuai: IP berada di Pool 1, mask /24, broadcast `192.239.2.255`, gateway `192.239.2.1`, dan DNS benar.
+
+### Tabel hasil seluruh klien
+
+Isi dari output masing-masing klien:
+
+| Klien | IP | Broadcast | Gateway | Lease time | DNS | Sesuai |
+|---|---|---|---|---|---|---|
+| itadori | | | | | | |
+| fushiguro | 192.239.2.14 | 192.239.2.255 | 192.239.2.1 | 600 | 192.239.1.2, .1.3 | ya |
+| zenin | | | | | | |
+| okkotsu | | | | | | |
+| ino | | | | | | |
+| kusakabe | | | | | | |
+| miwa | | | | | | |
+| kugisaki | | | | | | |
+
+> Screenshot:
+
+![modul3](assets/modul3_7.png)
+![modul3](assets/modul3_7.1.png)
+
+### Catatan domain-search
+
+Udhcpc pada klien Alpine hanya menuliskan DNS (option 6) ke `/etc/resolv.conf` dan tidak memproses domain-search (option 119), sehingga baris `search k56.com` tidak tampil di klien. Option tersebut tetap dikirim server dan dibuktikan dari paket DHCP ACK di tengen:
+
+```bash
+tcpdump -vni eth0 port 67 or port 68
+```
+
+Pada paket ACK terlihat Domain-Name-Server (6) berisi `192.239.1.2, 192.239.1.3` dan Domain-Search (119) berisi `k56.com`.
+
+## 5. Pencocokan dengan `dhcpd.leases` pada tengen
+
+Daftar lease terakhir per IP (file bersifat append-only, sehingga entri terakhir yang berlaku):
+
+```bash
+awk '/^lease/{ip=$2} /^  binding state/{st=$3} /hardware ethernet/{mac=$3} /^}/{a[ip]=ip" "mac" "st} END{for(i in a) print a[i]}' /var/lib/dhcp/dhcpd.leases | tr -d ';' | sort -V
+```
+
+Contoh data lease yang terekam:
+
+| IP | MAC | Pool |
+|---|---|---|
+| 192.239.2.10 | 02:42:d6:51:ef:00 | Pool 1 |
+| 192.239.2.13 | 02:42:7d:a7:cb:00 | Pool 1 (itadori) |
+| 192.239.2.70 | 02:42:54:9b:57:00 | Pool 2 (okkotsu) |
+| 192.239.2.71 | 02:42:30:6b:50:00 | Pool 2 |
+| 192.239.3.10 | 02:42:a6:c1:7d:00 | short |
+| 192.239.3.11 | 02:42:55:d0:dc:00 | short |
+| 192.239.3.100 | 02:42:14:04:b7:00 | long (miwa) |
+| 192.239.3.99 | 02:42:5c:a9:44:00 | fixed (kugisaki) |
+
+Ganti dengan output terbaru setelah seluruh klien melakukan renew.
+
+### Pemeriksaan kebijakan
+
+- **Tabrakan IP**: setiap IP hanya memiliki satu MAC dan setiap MAC hanya satu IP.
+- **Di luar pool**: tidak ada lease pada `192.239.2.36 – .69`, `192.239.2.96` ke atas, `192.239.3.90 – .98`, dan `192.239.3.200` ke atas. Satu-satunya pengecualian adalah `192.239.3.99` milik kugisaki.
+- **Pool sesuai klien**: itadori dan fushiguro berada di `.2.10–.35`, zenin dan okkotsu di `.2.70–.95`, ino dan kusakabe di `.3.10–.89`, miwa di `.3.100–.199`.
+
+> Screenshot: 
+
+![modul3](assets/modul3_7.2.png)
+
+## 7. Kesimpulan
+
+Seluruh klien Divisi A dan B menerima mask /24, gateway dan broadcast sesuai subnetnya, serta DNS `192.239.1.2` dan `192.239.1.3`. Domain-search `k56.com` terkirim dari server dan terbukti pada paket ACK. Lease pada tengen sesuai kebijakan pool: tidak ada tabrakan alamat dan tidak ada alamat di luar rentang yang ditentukan.

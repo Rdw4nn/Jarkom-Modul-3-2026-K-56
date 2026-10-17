@@ -989,3 +989,91 @@ Ganti dengan output terbaru setelah seluruh klien melakukan renew.
 ## 7. Kesimpulan
 
 Seluruh klien Divisi A dan B menerima mask /24, gateway dan broadcast sesuai subnetnya, serta DNS `192.239.1.2` dan `192.239.1.3`. Domain-search `k56.com` terkirim dari server dan terbukti pada paket ACK. Lease pada tengen sesuai kebijakan pool: tidak ada tabrakan alamat dan tidak ada alamat di luar rentang yang ditentukan.
+
+
+# Soal 8 – Packet Capture Proses DHCP (DORA)
+
+Kelompok: K56 | Prefix IP: `192.239`
+
+## 1. Tujuan
+
+Membuktikan proses pemberian alamat berjalan sesuai protokol dengan packet capture saat klien Network 2 atau 3 meminta lease baru:
+
+- Menunjukkan urutan DHCPDISCOVER → DHCPOFFER → DHCPREQUEST → DHCPACK
+- Mengidentifikasi alamat server, alamat yang diberikan, lease time, dan field giaddr
+- Memastikan giaddr sesuai dengan interface jichi yang menerima request dari subnet klien
+
+## 2. Metode
+
+Capture dijalankan pada tengen (`eth0`), yaitu jalur menuju Data Center, dengan mode verbose:
+
+```bash
+tcpdump -vvv -ni eth0 -s 0 'port 67 or port 68' | grep -E "Discover|Offer|Request|ACK|Gateway-IP|Server-ID|Your-IP|Lease-Time|Client-Ethernet"
+```
+
+Untuk melihat header penuh (alamat sumber dan tujuan tiap paket), capture dapat disimpan lalu dibaca ulang tanpa filter:
+
+```bash
+tcpdump -vvv -ni eth0 -s 0 'port 67 or port 68' -w /root/dora.pcap
+tcpdump -vvv -nr /root/dora.pcap
+```
+
+Pada klien itadori (Network 2), lease baru dipicu dengan:
+
+```bash
+ifdown eth0; ifup eth0
+```
+
+Karena request melewati relay, paket pada tengen tampak sebagai unicast antara `192.239.4.1` (jichi eth4) dan `192.239.4.10` (tengen). Balasan tengen dikirim ke alamat giaddr, bukan langsung ke klien.
+
+## 3. Hasil capture (klien itadori, MAC `02:42:7d:a7:cb:00`)
+
+Seluruh paket memiliki xid yang sama (`0x36f56c36`), sehingga merupakan satu transaksi.
+
+| # | Tipe | Informasi penting |
+|---|---|---|
+| 1 | DHCPDISCOVER | `192.239.4.1 > 192.239.4.10`, `Gateway-IP 192.239.2.1`, `Client-Ethernet-Address 02:42:7d:a7:cb:00` |
+| 2 | DHCPOFFER | `Your-IP 192.239.2.11`, `Server-ID 192.239.4.10`, `Lease-Time 600`, `Gateway-IP 192.239.2.1` |
+| 3 | DHCPREQUEST | `Requested-IP 192.239.2.11`, `Server-ID 192.239.4.10`, `Gateway-IP 192.239.2.1` |
+| 4 | DHCPACK | `Your-IP 192.239.2.11`, `Server-ID 192.239.4.10`, `Lease-Time 600`, `Gateway-IP 192.239.2.1` |
+
+> Screenshot:
+
+![modul3](assets/modul3_8.png)
+
+## 4. Identifikasi field
+
+| Yang diminta | Nilai | Letak pada paket |
+|---|---|---|
+| Alamat server | `192.239.4.10` | Server-ID (option 54) |
+| Alamat yang diberikan | `192.239.2.11` | Your-IP (yiaddr) pada Offer dan ACK |
+| Lease time | 600 detik | Lease-Time (option 51) pada Offer dan ACK |
+| giaddr | `192.239.2.1` | Gateway-IP pada header BOOTP |
+| Pool | Pool 1 (`.2.10–.2.35`) | `192.239.2.11` berada dalam rentang |
+
+## 5. Kesesuaian giaddr dengan interface jichi
+
+Klien Network 2 terhubung ke jichi melalui `eth2`, sehingga giaddr yang ditulis relay adalah IP `eth2`. Klien Network 3 masuk melalui `eth3` dengan giaddr `192.239.3.1`.
+
+| Subnet klien | Interface jichi | IP interface | giaddr pada paket |
+|---|---|---|---|
+| Network 2 | eth2 | 192.239.2.1 | 192.239.2.1 |
+| Network 3 | eth3 | 192.239.3.1 | 192.239.3.1 |
+
+Pembanding pada jichi:
+
+```bash
+ip -br a show eth2 eth3
+```
+
+Hasil: `eth2` bernilai `192.239.2.1/24` dan `eth3` bernilai `192.239.3.1/24`, sama dengan giaddr. Bukti tambahan: Offer dan ACK dari tengen dikirim ke `192.239.2.1` (giaddr), bukan ke `192.239.4.1`.
+
+
+## 6. Temuan tambahan pada capture
+
+- **Renew unicast**: terdapat paket `192.239.2.11.68 > 192.239.4.10.67` berisi Server-ID. Ini adalah perpanjangan lease oleh klien langsung ke server pada fase renewal, bukan bagian dari DORA.
+- **Discover tanpa balasan dari MAC `f2:dd:ec:51:c9:cb`**: pada capture awal terdapat Discover berulang dengan `Gateway-IP 192.239.3.1` tanpa Offer. MAC tersebut kemudian diketahui milik zenin setelah MAC-nya berubah; karena tidak cocok dengan class `pool2`, tengen tidak menjawab (lihat soal 4). Giaddr `192.239.3.1` pada paket itu menunjukkan request masuk lewat eth3 (Network 3), padahal zenin seharusnya berada di Network 2. Letak kabel zenin pada topologi GNS3 perlu dipastikan.
+
+## 7. Kesimpulan
+
+Capture pada tengen menunjukkan urutan lengkap Discover, Offer, Request, dan ACK untuk klien itadori: server `192.239.4.10` memberikan alamat `192.239.2.11` dengan lease 600 detik. Nilai giaddr `192.239.2.1` sesuai dengan IP interface `eth2` jichi yang menerima request dari Network 2, dan balasan server dikirim ke giaddr tersebut, sehingga relay bekerja sebagaimana mestinya.

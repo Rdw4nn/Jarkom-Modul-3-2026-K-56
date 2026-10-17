@@ -800,8 +800,6 @@ grep -A8 "192.239.3.99" /var/lib/dhcp/dhcpd.leases
 
 Hasil: blok `host kugisaki` memuat MAC `02:42:5c:a9:44:00` dan fixed-address `192.239.3.99`, `dhcpd -t` exit code `0`, dan lease `192.239.3.99` tercatat dengan MAC kugisaki.
 
-> Screenshot: `[01-host-block.png]`, `[02-dhcpd-test.png]`, `[03-leases.png]`
-
 ### 4.2 Klien (kugisaki)
 
 Output renew:
@@ -823,7 +821,8 @@ ifdown eth0; ifup eth0; ip -br a show eth0
 
 Hasil: tetap `192.239.3.99/24`.
 
-> Screenshot: `[04-kugisaki-lease.png]`, `[05-kugisaki-renew-ulang.png]`
+> Screenshot: 
+![soal6](assets/modul3_6.png)
 
 ## 5. Kesimpulan
 

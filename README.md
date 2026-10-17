@@ -844,6 +844,8 @@ Lalu jalankan ulang `/root/setup-tengen.sh` dan renew pada kugisaki.
 
 Kelompok: K56 | Prefix IP: `192.239`
 
+> Setelah aturan alokasi diterapkan, pastikan setiap client menerima konfigurasi jaringan sesuai wilayahnya: subnet mask 255.255.255.0 (/24), gateway dan broadcast address yang benar, DNS [PREFIX IP].1.2 serta [PREFIX IP].1.3, dan domain-search yang ditentukan. Periksa IP address dan routing seluruh client Divisi A dan Divisi B, kemudian cocokkan lease dengan /var/lib/dhcp/dhcpd.leases pada tengen. Pastikan tidak ada alamat yang bertabrakan atau berada di luar kebijakan pool.
+
 ## 1. Tujuan
 
 Setelah aturan alokasi diterapkan, setiap klien harus menerima konfigurasi jaringan sesuai wilayahnya:
@@ -995,6 +997,8 @@ Seluruh klien Divisi A dan B menerima mask /24, gateway dan broadcast sesuai sub
 
 Kelompok: K56 | Prefix IP: `192.239`
 
+> Sebelum Curtain dibuka kembali, buktikan bahwa proses pemberian alamat berjalan sesuai protokol. Lakukan packet capture saat salah satu client Network 2 atau Network 3 meminta lease baru. Gunakan tcpdump pada tengen atau jalur menuju Data Center untuk menunjukkan urutan DHCPDISCOVER → DHCPOFFER → DHCPREQUEST → DHCPACK. Identifikasi alamat server, alamat yang diberikan, lease time, dan field giaddr. Pastikan nilai giaddr sesuai dengan interface jichi yang menerima request dari subnet client.
+
 ## 1. Tujuan
 
 Membuktikan proses pemberian alamat berjalan sesuai protokol dengan packet capture saat klien Network 2 atau 3 meminta lease baru:
@@ -1083,6 +1087,8 @@ Capture pada tengen menunjukkan urutan lengkap Discover, Offer, Request, dan ACK
 # Soal 9 – Simulasi Gangguan DHCP Relay
 
 Kelompok: K56 | Prefix IP: `192.239`
+
+> Sebuah gangguan memutus jalur relay dan membuat permintaan alamat tidak sampai ke Data Center. Hentikan service DHCP Relay pada jichi, lalu paksa salah satu client di Network 2 atau Network 3 meminta lease baru dan catat gejalanya. Pulihkan service relay, ulangi permintaan DHCP, lalu buktikan bahwa client kembali memperoleh alamat dari pool yang benar dengan gateway semula.
 
 ## 1. Tujuan
 
@@ -1241,6 +1247,9 @@ service isc-dhcp-relay start
 # Soal 10 – Persistensi Layanan Setelah Restart
 
 Kelompok: K56 | Prefix IP: `192.239`
+
+> Setelah gangguan Shibuya tertangani, pastikan pemulihan bertahan setelah restart. Aktifkan autostart DHCP Server pada tengen dan DHCP Relay pada jichi, lalu restart kedua node. Verifikasi status layanan, IP, gateway, lease, dan konektivitas client Network 2–3. Pastikan kebijakan Pool 1, Pool 2, short lease, long lease, dan fixed address tetap berlaku.
+
 
 ## 1. Tujuan
 

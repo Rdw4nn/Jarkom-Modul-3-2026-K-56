@@ -1169,7 +1169,6 @@ udhcpc: lease of 192.239.2.11 obtained from 192.239.4.10, lease time 600
 
 IP `192.239.2.11` (Pool 1) dari server `192.239.4.10`.
 
-> Screenshot: `[01-itadori-normal.png]`
 
 ### 3.2 Relay dihentikan
 
@@ -1236,3 +1235,194 @@ service isc-dhcp-relay start
 # jika gagal:
 /root/setup-jichi.sh
 ```
+
+
+
+# Soal 10 – Persistensi Layanan Setelah Restart
+
+Kelompok: K56 | Prefix IP: `192.239`
+
+## 1. Tujuan
+
+Memastikan pemulihan bertahan setelah restart:
+
+- Mengaktifkan autostart DHCP Server pada tengen dan DHCP Relay pada jichi
+- Merestart kedua node
+- Memverifikasi status layanan, IP, gateway, lease, dan konektivitas klien Network 2–3
+- Memastikan kebijakan Pool 1, Pool 2, short lease, long lease, dan fixed address tetap berlaku
+
+## 2. Pemeriksaan mekanisme init
+
+Pada jichi dan tengen:
+
+```bash
+ps -p 1 -o comm=
+which systemctl
+ls /etc/init.d | grep dhcp
+```
+
+Hasil:
+
+| Node | PID 1 | systemctl | Skrip init.d |
+|---|---|---|---|
+| jichi | `dumb-init` | tidak ada | `isc-dhcp-relay` |
+| tengen | `dumb-init` | tidak ada | `isc-dhcp-server` |
+
+`systemctl enable isc-dhcp-server` dan `systemctl enable isc-dhcp-relay` menghasilkan `systemctl: command not found`. Container tidak memakai systemd (PID 1 adalah `dumb-init`), sehingga `systemctl enable` dan `update-rc.d` tidak menjalankan layanan saat boot. Autostart dilakukan dengan hook `post-up` pada `/etc/network/interfaces`, yang dijalankan ketika interface naik saat node dinyalakan.
+
+## 3. Konfigurasi autostart
+
+### 3.1 tengen
+
+`/etc/network/interfaces`:
+
+```
+auto eth0
+iface eth0 inet static
+    address 192.239.4.10
+    netmask 255.255.255.0
+    gateway 192.239.4.1
+    post-up service isc-dhcp-server start
+```
+
+Verifikasi sebelum restart:
+
+```bash
+grep -A6 "eth0" /etc/network/interfaces
+service isc-dhcp-server status
+dhcpd -t -cf /etc/dhcp/dhcpd.conf; echo "exit code: $?"
+```
+
+Hasil: hook `post-up` terpasang, `dhcpd is running`, `exit code: 0`.
+
+### 3.2 jichi
+
+Skrip ringan `/root/autostart-jichi.sh` (tanpa `apt update` agar cepat dan tidak bergantung pada DNS saat boot):
+
+```bash
+#!/bin/bash
+echo 1 > /proc/sys/net/ipv4/ip_forward
+iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || \
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+service isc-dhcp-relay restart
+```
+
+```bash
+chmod +x /root/autostart-jichi.sh
+```
+
+`/etc/network/interfaces`, blok eth4 (interface terakhir, sehingga eth2 dan eth3 sudah aktif saat relay dijalankan):
+
+```
+auto eth4
+iface eth4 inet static
+    address 192.239.4.1
+    netmask 255.255.255.0
+    post-up /root/autostart-jichi.sh
+```
+
+Urutan interface dicek dengan `grep -n "^auto" /etc/network/interfaces`: eth0, eth1, eth2, eth3, eth4.
+
+Skrip diuji manual sebelum restart:
+
+```
+root@jichi:~# ./autostart-jichi.sh
+Requesting: eth2 as upstream: N downstream: Y
+Requesting: eth3 as upstream: N downstream: Y
+Requesting: eth4 as upstream: Y downstream: N
+
+root  527  ...  /usr/sbin/dhcrelay -q -id eth2 -id eth3 -iu eth4 192.239.4.10
+ip_forward = 1
+-A POSTROUTING -o eth0 -j MASQUERADE
+```
+
+## 4. Restart
+
+Dari GNS3: **Stop** lalu **Start** (bukan Delete/Reset). Urutan: tengen, jichi, lalu klien. Setelah node menyala, tidak ada layanan yang dijalankan secara manual.
+
+## 5. Verifikasi setelah restart
+
+### 5.1 tengen
+
+```bash
+ip -br a show eth0
+ip route | grep default
+service isc-dhcp-server status
+ps aux | grep [d]hcpd
+dhcpd -t -cf /etc/dhcp/dhcpd.conf; echo "exit code: $?"
+```
+
+Hasil: `192.239.4.10/24`, default via `192.239.4.1`, dhcpd running, `exit code: 0`. (isi dari output)
+
+### 5.2 jichi
+
+```bash
+ip -br a
+cat /proc/sys/net/ipv4/ip_forward
+iptables -t nat -S POSTROUTING
+ps aux | grep [d]hcrelay
+```
+
+Hasil: eth0 `192.168.122.x`, eth1 s.d. eth4 `192.239.1.1` s.d. `192.239.4.1`, `ip_forward = 1`, aturan MASQUERADE ada, dhcrelay berjalan dengan `-id eth2 -id eth3 -iu eth4 192.239.4.10`. (isi dari output)
+
+> Screenshot: 
+![modul3](assets/modul3_10.png)
+
+### 5.3 Klien Network 2 dan 3
+
+```bash
+ifdown eth0; ifup eth0
+ip -4 addr show eth0
+ip route | grep default
+```
+
+| Klien | IP yang diharapkan | Gateway | Lease | Hasil |
+|---|---|---|---|---|
+| itadori | 192.239.2.10 – .35 | 192.239.2.1 | 600 | |
+| fushiguro | 192.239.2.10 – .35 | 192.239.2.1 | 600 | |
+| zenin | 192.239.2.70 – .95 | 192.239.2.1 | 600 | |
+| okkotsu | 192.239.2.70 – .95 | 192.239.2.1 | 600 | |
+| ino | 192.239.3.10 – .89 | 192.239.3.1 | 1800 | |
+| kusakabe | 192.239.3.10 – .89 | 192.239.3.1 | 1800 | |
+| miwa | 192.239.3.100 – .199 | 192.239.3.1 | 43200 | |
+| kugisaki | 192.239.3.99 (fixed) | 192.239.3.1 | 600 | |
+
+> Screenshot: 
+
+![soal10](assets/modul3_10.1.png)
+![soal10](assets/modul3_10.2.png)
+
+Konektivitas, dari satu klien Network 2 dan satu klien Network 3:
+
+```bash
+ping -c2 192.239.4.10
+ping -c2 8.8.8.8
+```
+
+### 5.4 Kebijakan pool pada lease tengen
+
+```bash
+grep -E "^lease|hardware ethernet|^  binding state" /var/lib/dhcp/dhcpd.leases
+```
+
+Pemeriksaan: Pool 1 (`.2.10–.35`) untuk itadori dan fushiguro, Pool 2 (`.2.70–.95`) untuk zenin dan okkotsu, short lease (`.3.10–.89`, 1800 detik) untuk ino dan kusakabe, long lease (`.3.100–.199`, 43200 detik) untuk miwa, dan fixed `192.239.3.99` untuk kugisaki. Tidak ada lease pada `.2.36–.69`, `.2.96` ke atas, `.3.90–.98`, atau `.3.200` ke atas (selain `.3.99`).
+
+## 6. Temuan: MAC zenin berubah
+
+Setelah restart, zenin tidak memperoleh lease (discover berulang tanpa balasan). Penyebabnya, MAC zenin berubah dari `02:42:30:6b:50:00` menjadi `f2:dd:ec:51:c9:cb`, sehingga tidak cocok dengan class `pool2` pada `dhcpd.conf`.
+
+Perbaikan pada tengen:
+
+```bash
+sed -i 's/02:42:30:6b:50:00/f2:dd:ec:51:c9:cb/' /root/setup-tengen.sh
+/root/setup-tengen.sh
+dhcpd -t -cf /etc/dhcp/dhcpd.conf; echo "exit code: $?"
+```
+
+Lalu renew pada zenin; IP yang benar berada pada `192.239.2.70 – .95`.
+
+Pelajaran: kebijakan berbasis MAC bergantung pada MAC node GNS3 yang dapat berubah. Setelah restart atau pembuatan ulang node, MAC tiap klien perlu dicocokkan kembali dengan class pada `dhcpd.conf`.
+
+## 7. Kesimpulan
+
+Autostart dikonfigurasi dengan hook `post-up` karena container berjalan di bawah `dumb-init` tanpa systemd: DHCP Server pada tengen dan DHCP Relay (beserta IP forwarding dan NAT) pada jichi. Setelah restart, layanan aktif tanpa intervensi manual dan klien Network 2–3 kembali memperoleh alamat sesuai kebijakan Pool 1, Pool 2, short lease, long lease, dan fixed address.

@@ -373,7 +373,6 @@ ps aux | grep [d]hcrelay
 
 Hasil yang diharapkan: tujuan `192.239.4.10`, proses `dhcrelay -q -id eth2 -id eth3 -iu eth4 192.239.4.10`.
 
-> Screenshot: `[01-jichi-relay.png]`
 
 ### 4.2 Klien Network 2 (itadori)
 
@@ -385,7 +384,6 @@ ip route | grep default
 
 Hasil: `lease of 192.239.2.x obtained from 192.239.4.10`, IP `192.239.2.x/24`, default route `192.239.2.1`.
 
-> Screenshot: `[02-itadori-lease.png]`
 
 ### 4.3 Klien Network 3 (miwa)
 
@@ -393,7 +391,6 @@ Perintah sama seperti di atas.
 
 Hasil: `lease of 192.239.3.x obtained from 192.239.4.10`, IP `192.239.3.x/24`, default route `192.239.3.1`.
 
-> Screenshot: `[03-miwa-lease.png]`
 
 ### 4.4 Sisi server (tengen)
 
@@ -403,19 +400,7 @@ grep -E "^lease|hardware ethernet" /var/lib/dhcp/dhcpd.leases | tail -n 20
 
 Hasil: terdapat lease untuk `192.239.2.x` dan `192.239.3.x` beserta MAC klien, membuktikan permintaan dari kedua subnet sampai ke tengen.
 
-> Screenshot: `[04-tengen-leases.png]`
-
-### 4.5 Bukti tambahan (opsional): tangkap paket
-
-Pada tengen:
-
-```bash
-tcpdump -ni eth0 port 67 or port 68
-```
-
-Discover/Request tampak dari `192.239.4.1` (jichi eth4) ke `192.239.4.10`, sedangkan Offer/ACK dikirim tengen ke `192.239.2.1` atau `192.239.3.1` (giaddr), sehingga membuktikan paket diteruskan oleh relay.
-
-> Screenshot: `[05-tcpdump.png]`
+> Screenshot:![Topologi](assets/modul3_3.png)
 
 ## 5. Kesimpulan
 
